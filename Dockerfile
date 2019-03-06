@@ -1,0 +1,219 @@
+FROM php:7.0-apache
+
+RUN apt-get update
+RUN apt-get install -y \
+   git \
+   vim \
+   cron \
+   zip \
+   unzip \
+   nano \
+   libmemcached-dev \
+   curl \
+   mysql-client \
+   sendmail-bin \
+   sendmail
+
+ENV TERM xterm
+
+
+RUN a2enmod rewrite ssl proxy proxy_http proxy_html vhost_alias xml2enc
+
+# install the PHP extensions we need
+# Install PHP extensions and PECL modules.
+RUN buildDeps=" \
+        default-libmysqlclient-dev \
+        libbz2-dev \
+        libmemcached-dev \
+        libsasl2-dev \
+    " \
+    runtimeDeps=" \
+        curl \
+        git \
+        libfreetype6-dev \
+        libicu-dev \
+        libjpeg-dev \
+        libldap2-dev \
+        libmcrypt-dev \
+        libmemcachedutil2 \
+        libpng-dev \
+        libpq-dev \
+        libxml2-dev \
+        libzip-dev \
+    " \
+    && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y $buildDeps $runtimeDeps \
+    && docker-php-ext-install bcmath bz2 calendar iconv intl mbstring  mysqli opcache pdo_mysql pdo_pgsql pgsql soap zip \
+    && docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ \
+    && docker-php-ext-install gd \
+    && docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ \
+    && docker-php-ext-install ldap \
+    && docker-php-ext-install exif \
+    && pecl install memcached redis \
+    && docker-php-ext-enable soap \
+    && docker-php-ext-enable memcached.so redis.so \
+    && apt-get purge -y --auto-remove $buildDeps \
+    && rm -r /var/lib/apt/lists/* \
+&& a2enmod rewrite
+
+# Install composer
+RUN curl -sSL https://getcomposer.org/installer | php  && \
+   mv composer.phar /usr/local/bin/composer &&\
+   # Install PHPUnit
+  curl -sSL https://phar.phpunit.de/phpunit.phar -o phpunit.phar && \
+    chmod +x phpunit.phar && \
+       mv phpunit.phar /usr/local/bin/phpunit && \
+ # Install Drupal Console
+   curl https://drupalconsole.com/installer -o /usr/local/bin/drupal && \
+   chmod +x /usr/local/bin/drupal && \
+    echo 'export PATH="$HOME/.composer/vendor/bin:$PATH"' >> /root/.bashrc
+
+COPY apache2.conf /etc/apache2/apache2.conf
+COPY 000-default.conf /etc/apache2/sites-available/000-default.conf
+COPY ports.conf /etc/apache2/ports.conf
+WORKDIR /var/www/html
+EXPOSE 80 443
+
+### Memcached
+RUN set -x \
+    && apt-get update && apt-get install -y --no-install-recommends unzip libssl-dev libpcre3 libpcre3-dev \
+    && cd /tmp \
+    && curl -sSL -o php7.zip https://github.com/websupport-sk/pecl-memcache/archive/php7.zip \
+    && unzip php7 \
+    && cd pecl-memcache-php7 \
+    && /usr/local/bin/phpize \
+    && ./configure --with-php-config=/usr/local/bin/php-config \
+    && make \
+    && make install \
+    && echo "extension=memcache.so" > /usr/local/etc/php/conf.d/ext-memcache.ini \
+    && rm -rf /tmp/pecl-memcache-php7 php7.zip 
+
+RUN { \
+    echo 'opcache.memory_consumption=128'; \
+    echo 'opcache.interned_strings_buffer=8'; \
+    echo 'opcache.max_accelerated_files=4000'; \
+    echo 'opcache.revalidate_freq=60'; \
+    echo 'opcache.fast_shutdown=1'; \
+    echo 'opcache.enable_cli=1'; \
+  } > /usr/local/etc/php/conf.d/opcache-recommended.ini
+
+RUN apt-get update && apt-get install -y libc-client-dev libkrb5-dev && rm -rf /var/lib/apt/lists/*
+RUN docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
+    && docker-php-ext-install imap opcache
+
+RUN echo "export TERM=xterm"  >> ~/.bashrc
+
+####Icu and intl
+RUN apt-get update -y && \
+    apt-get install -y zlib1g-dev libicu-dev g++ && \
+    docker-php-ext-configure intl && \
+    docker-php-ext-install intl
+
+
+##SOAP LIBRARY
+#RUN apt-get update -yqq && \
+#    apt-get -y install libxml2-dev php-soap && \
+#    docker-php-ext-install soap
+
+##Install mongodb
+RUN pecl install mongodb && \
+    docker-php-ext-enable mongodb 
+##Insall amqp
+RUN apt-get update && \
+    apt-get install librabbitmq-dev -y && \
+    # Install the amqp extension
+    pecl install amqp && \
+    docker-php-ext-enable amqp
+##Install gmp
+
+RUN apt-get update -yqq && \
+  apt-get install -y libgmp-dev && \ 
+    docker-php-ext-install gmp 
+##Install ghostscript
+RUN apt-get update -yqq \
+    && apt-get install -y \
+    poppler-utils \
+    ghostscript 
+
+##Install ldap
+RUN apt-get update -yqq && \
+    apt-get install -y libldap2-dev && \
+    docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ && \
+    docker-php-ext-install ldap
+
+#####################################
+# SQL SERVER:
+#####################################
+
+ARG INSTALL_MSSQL=true
+ENV INSTALL_MSSQL ${INSTALL_MSSQL}
+RUN if [ ${INSTALL_MSSQL} = true ]; then \
+    #####################################
+    # Ref from https://github.com/Microsoft/msphpsql/wiki/Dockerfile-for-adding-pdo_sqlsrv-and-sqlsrv-to-official-php-image
+    #####################################
+    # Add Microsoft repo for Microsoft ODBC Driver 13 for Linux
+    apt-get update -yqq && apt-get install -y gnupg2 apt-transport-https \
+        && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+        && curl https://packages.microsoft.com/config/debian/8/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+        && apt-get update -yqq \
+    # Install Dependencies
+        && ACCEPT_EULA=Y apt-get install -y unixodbc unixodbc-dev libgss3 odbcinst msodbcsql locales \
+        && echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen \
+    # Install pdo_sqlsrv and sqlsrv from PECL. Replace pdo_sqlsrv-4.1.8preview with preferred version.
+        && pecl install pdo_sqlsrv-4.1.8preview sqlsrv-4.1.8preview \
+        && docker-php-ext-enable pdo_sqlsrv sqlsrv \
+;fi
+
+#####################################
+# Image optimizers:
+#####################################
+ARG INSTALL_IMAGE_OPTIMIZERS=true
+ENV INSTALL_IMAGE_OPTIMIZERS ${INSTALL_IMAGE_OPTIMIZERS}
+RUN if [ ${INSTALL_IMAGE_OPTIMIZERS} = true ]; then \
+    apt-get update -yqq && \
+    apt-get install -y --force-yes jpegoptim optipng pngquant gifsicle \
+;fi
+
+#####################################
+# ImageMagick:
+#####################################
+ARG INSTALL_IMAGEMAGICK=true
+ENV INSTALL_IMAGEMAGICK ${INSTALL_IMAGEMAGICK}
+RUN if [ ${INSTALL_IMAGEMAGICK} = true ]; then \
+    apt-get update -y && \
+    apt-get install -y libmagickwand-dev imagemagick && \ 
+    pecl install imagick && \
+    docker-php-ext-enable imagick \
+;fi
+
+########################################
+# Node 
+########################################
+
+RUN curl -sL https://deb.nodesource.com/setup_8.x | bash  && \
+    apt-get install -yq nodejs build-essential yarn
+
+
+
+######################################
+# Imagemagic
+######################################
+
+RUN apt install wget && wget https://imagemagick.org/download/ImageMagick.tar.gz && \
+    tar xvzf ImageMagick.tar.gz && \
+    cd ImageMagick-7.0.8-28 && \
+    ./configure && \
+    make && \
+    make install && \
+    ldconfig /usr/local/lib && \
+    cd ../ && rm -rf ImageMagick*
+
+
+
+WORKDIR /var/www/html
+COPY vhost.conf /etc/apache2/sites-available/vhost.conf
+COPY vhost.conf /etc/apache2/sites-enabled/vhost.conf
+COPY php.ini   /usr/local/etc/php/conf.d/php.ini
+RUN apt-get -y autoclean && apt-get -y autoremove && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -q -y ssmtp mailutils && rm -rf /var/lib/apt/lists/*
+RUN echo "localhost localhost.localdomain" >> /etc/hosts
+
