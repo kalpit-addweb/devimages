@@ -204,7 +204,7 @@ RUN curl -sL https://deb.nodesource.com/setup_8.x | bash  && \
 
 RUN apt install wget && wget https://imagemagick.org/download/ImageMagick.tar.gz && \
     tar xvzf ImageMagick.tar.gz && \
-    cd ImageMagick-7.0.8-28 && \
+    cd ImageMagick-* && \
     ./configure && \
     make && \
     make install && \
@@ -212,6 +212,9 @@ RUN apt install wget && wget https://imagemagick.org/download/ImageMagick.tar.gz
     cd ../ && rm -rf ImageMagick*
 
 
+######################################
+# JAVA
+######################################
 
 WORKDIR /var/www/html
 COPY vhost.conf /etc/apache2/sites-available/vhost.conf

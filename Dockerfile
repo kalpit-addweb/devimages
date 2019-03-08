@@ -173,25 +173,13 @@ RUN if [ ${INSTALL_IMAGE_OPTIMIZERS} = true ]; then \
     apt-get install -y --force-yes jpegoptim optipng pngquant gifsicle \
 ;fi
 
-#####################################
-# ImageMagick:
-#####################################
-ARG INSTALL_IMAGEMAGICK=true
-ENV INSTALL_IMAGEMAGICK ${INSTALL_IMAGEMAGICK}
-RUN if [ ${INSTALL_IMAGEMAGICK} = true ]; then \
-    apt-get update -y && \
-    apt-get install -y libmagickwand-dev imagemagick && \ 
-    pecl install imagick && \
-    docker-php-ext-enable imagick \
-;fi
-
-########################################
+#########################################
 # Node 
 ########################################
 
 RUN curl -sL https://deb.nodesource.com/setup_8.x | bash  && \
-    apt-get install -yq nodejs build-essential yarn
-
+    apt-get install -yq nodejs 
+RUN npm install -g gulp-cli && npm install -g yarn && npm install -g gatsby-cli
 
 
 ######################################
@@ -206,6 +194,25 @@ RUN apt install wget && wget https://imagemagick.org/download/ImageMagick.tar.gz
     make install && \
     ldconfig /usr/local/lib && \
     cd ../ && rm -rf ImageMagick*
+
+###############################
+# Install OpenJDK-8
+##########################
+RUN apt-get update && \
+    apt-get install -y openjdk-8-jdk && \
+    apt-get install -y ant && \
+    apt-get clean;
+
+# Fix certificate issues
+RUN apt-get update && \
+    apt-get install ca-certificates-java && \
+    apt-get clean && \
+    update-ca-certificates -f;
+
+# Setup JAVA_HOME -- useful for docker commandline
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64/
+RUN export JAVA_HOME
+##################################################
 
 
 
